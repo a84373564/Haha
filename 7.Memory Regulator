@@ -1,0 +1,47 @@
+import json
+from pathlib import Path
+
+# 路徑設定
+mem_path = Path("~/Killcore/king_memory.json").expanduser()
+
+# 檢查檔案是否存在
+if not mem_path.exists():
+    raise FileNotFoundError("找不到 king_memory.json")
+
+# 載入記憶內容
+memory = json.loads(mem_path.read_text())
+
+# 確保所有必要欄位存在（自動補欄機制）
+required_fields = {
+    "live_rounds": 0,
+    "fail_indicators_count": {},
+    "history": [],
+    "style_profile": None,
+    "learning_score": 0,
+    "memory_flags": {},
+    "aging_map": {},
+    "fail_pattern_stats": {},
+    "evolution_trace": []
+}
+for k, default in required_fields.items():
+    if k not in memory:
+        memory[k] = default
+
+# 清理策略 1：歷史記憶僅保留最新 30 輪
+if len(memory["history"]) > 30:
+    excess = len(memory["history"]) - 30
+    memory["aging_map"] = {str(i): "過期" for i in range(excess)}
+    memory["history"] = memory["history"][-30:]
+
+# 清理策略 2：進化紀錄僅保留最新 20 筆
+if len(memory["evolution_trace"]) > 20:
+    memory["evolution_trace"] = memory["evolution_trace"][-20:]
+
+# 清理策略 3：風險指標只保留前 50 項
+if len(memory["fail_indicators_count"]) > 50:
+    sorted_items = sorted(memory["fail_indicators_count"].items(), key=lambda x: x[1], reverse=True)
+    memory["fail_indicators_count"] = dict(sorted_items[:50])
+
+# 儲存更新
+mem_path.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
+print(f"[Memory Regulator] 清理完成 ｜ 紀錄數={len(memory['history'])}，進化紀錄={len(memory['evolution_trace'])}")
