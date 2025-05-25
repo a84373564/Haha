@@ -1,11 +1,11 @@
 import json
+import shutil
 from pathlib import Path
 
-MAX_HISTORY = 1000  # 最大記憶保留輪數
-MAX_ARCHIVES = 100  # 歷史封存輪數
-MAX_LOGS = 100      # 日誌封存輪數
+MAX_HISTORY = 1000
+MAX_ARCHIVES = 100
+MAX_LOGS = 100
 
-# 給每筆歷史資料打分數
 def score_memory(entry):
     score = 0
     if entry.get("return_pct", 0) > 0: score += 1
@@ -15,7 +15,7 @@ def score_memory(entry):
     if entry.get("net_profit", 0) > 0: score += 1
     return score
 
-# 路徑設定
+# 路徑
 mem_path = Path("~/Killcore/king_memory.json").expanduser()
 archive_path = Path("~/Killcore/archives").expanduser()
 log_path = Path("~/Killcore/logs").expanduser()
@@ -41,7 +41,7 @@ for k, default in required_fields.items():
     if k not in memory:
         memory[k] = default
 
-# 保護風格與演化意圖首次出現輪次
+# 保護演化風格與意圖
 protected_indices = set()
 seen_styles = set()
 seen_intents = set()
@@ -56,7 +56,7 @@ for trace in memory.get("evolution_trace", []):
         seen_intents.add(intent)
         protected_indices.add(gen)
 
-# 打分與淘汰邏輯
+# 打分與選擇
 scored = []
 for i, h in enumerate(memory["history"]):
     gen = h.get("generation", i)
@@ -64,7 +64,6 @@ for i, h in enumerate(memory["history"]):
     is_protected = gen in protected_indices or score >= 4
     scored.append((i, h, score, is_protected))
 
-# 排序保留最強與保護資料
 scored.sort(key=lambda x: (x[3], x[2]), reverse=True)
 final_pool = scored[:MAX_HISTORY]
 final_indices = {i for i, _, _, _ in final_pool}
@@ -79,19 +78,22 @@ for i, h in enumerate(memory["history"]):
 memory["history"] = new_history
 memory["aging_map"] = new_aging_map
 
-# 實體資料夾清理邏輯（封存與日誌）
+# 清理資料夾中多餘檔案或資料夾
 def clean_folder(path: Path, keep: int):
     if not path.exists(): return
-    files = sorted(path.glob("*"), key=lambda f: f.stat().st_mtime, reverse=True)
+    files = sorted(path.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True)
     for f in files[keep:]:
         try:
-            f.unlink()
+            if f.is_file():
+                f.unlink()
+            elif f.is_dir():
+                shutil.rmtree(f)
         except Exception as e:
             print(f"刪除失敗 {f.name}: {e}")
 
 clean_folder(archive_path, MAX_ARCHIVES)
 clean_folder(log_path, MAX_LOGS)
 
-# 儲存
+# 儲存記憶
 mem_path.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
 print(f"[Memory Regulator] 智慧清理完成 ｜ 紀錄數={len(memory['history'])}，進化={len(memory['evolution_trace'])}，封存淘汰={len(memory['aging_map'])}")
