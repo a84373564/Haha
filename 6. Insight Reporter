@@ -1,0 +1,77 @@
+import json
+from pathlib import Path
+from datetime import datetime
+
+# 路徑設定
+king_path = Path("~/Killcore/modules/king.json").expanduser()
+perf_path = Path("~/Killcore/king_performance.json").expanduser()
+mem_path = Path("~/Killcore/king_memory.json").expanduser()
+
+# 資料讀取
+king = json.loads(king_path.read_text())
+perf = json.loads(perf_path.read_text())
+memory = json.loads(mem_path.read_text())
+
+# 歷史摘要
+history = memory.get("history", [])[-5:]
+returns = [round(r.get("return_pct", 0), 2) for r in history]
+winrates = [round(r.get("win_rate", 0), 1) for r in history]
+evo_trace = memory.get("evolution_trace", [])
+latest_evo = evo_trace[-1] if evo_trace else {}
+first_evo = evo_trace[0] if evo_trace else {}
+
+# 標籤判斷
+labels = []
+if memory.get("learning_score", 0) >= 4:
+    labels.append("學習型")
+if king.get("style_profile") == "balanced":
+    labels.append("穩健風格")
+if all(r.get("return_pct", 0) > 0 for r in history):
+    labels.append("穩定成長")
+if memory.get("style_drift_flag"):
+    labels.append("風格漂移中")
+if memory.get("bad_behavior_tag"):
+    labels.extend(memory.get("bad_behavior_tag", []))
+
+# CLI 輸出
+print("\n[Insight Reporter] 模組戰況報告書")
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+print("【模組資訊】")
+print(f"模組 ID：{king.get('id', 'unknown')}")
+print(f"幣種：{king.get('symbol')}")
+print(f"策略類型：{king.get('strategy_type')}")
+print(f"情緒傾向：{king.get('emotional_tendency')}")
+print(f"進化代數：{king.get('generation')}")
+print(f"生存輪數：{memory.get('live_rounds')}")
+print(f"訓練編碼：{king.get('training_trace_id')}")
+print(f"基因識別碼：{king.get('genetic_id')}")
+print(f"風格標籤：{king.get('style_profile')}")
+print(f"目前狀態標籤：{', '.join(labels) if labels else '無'}")
+
+print("\n【最近一輪績效】")
+print(f"報酬率：{perf.get('return_pct', 0):+} %")
+print(f"淨損益：{perf.get('net_profit', 0):+} USDT")
+print(f"回撤：{perf.get('drawdown', 0)} %")
+print(f"勝率：{perf.get('win_rate', 0)} %")
+print(f"Sharpe：{perf.get('sharpe', 0)}")
+print(f"失敗原因：{perf.get('fail_reason', '無')}")
+fail_indicators = perf.get("fail_indicators", [])
+print(f"風險指標觸發：{', '.join(fail_indicators) if fail_indicators else '無'}")
+
+print("\n【歷史績效摘要】")
+print("最近 5 輪報酬趨勢（%）：", " → ".join([f"{r:+}" for r in returns]))
+print("最近 5 輪勝率：", " → ".join([f"{w:.1f}%" for w in winrates]))
+print(f"學習力：{memory.get('learning_score')} / 5 輪")
+print(f"封印候選因子：{', '.join([k for k,v in memory.get('memory_flags', {}).items() if v == '封印候選']) or '無'}")
+print(f"風格偏移：{'是' if memory.get('style_drift_flag') else '否'}")
+
+print("\n【人格演化紀錄】")
+print(f"初始風格：{first_evo.get('style', 'unknown')} / 情緒：{first_evo.get('emotion', 'unknown')}")
+print(f"最新風格：{king.get('style_profile')} / 情緒：{king.get('emotional_tendency')}")
+print("最新進化意圖：")
+for i in latest_evo.get("intent", []):
+    print(f"- {i}")
+print(f"演化結果：{latest_evo.get('result')}")
+
+print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+print(f"報告時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
