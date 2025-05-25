@@ -10,7 +10,7 @@ module_dir = Path("~/Killcore/modules").expanduser()
 module_dir.mkdir(parents=True, exist_ok=True)
 memory_file = Path("~/Killcore/symbol_memory.json").expanduser()
 
-# 讀取上一輪選出的幣種（symbol）
+# 檢查幣種來源
 if not memory_file.exists():
     raise FileNotFoundError("請先執行 symbol_selector.py")
 memory = json.loads(memory_file.read_text())
@@ -23,7 +23,7 @@ theme_pool = ["trend_following", "breakout", "mean_revert"]
 emotions = ["greedy", "fearful", "hesitant", "balanced", "aggressive"]
 indicators = ["MA", "RSI", "Volume", "MACD", "PriceAction"]
 
-# 隨機風格
+# 隨機風格參數
 style = random.choice(style_pool)
 if style == "defensive":
     ma_fast, ma_slow, sl, tp = 20, 60, 2, 4
@@ -41,17 +41,19 @@ parameters = {
     "tp_pct": tp
 }
 
-# 決策權重
+# 決策權重地圖
 selected_indicators = random.sample(indicators, 3)
 weights = [random.uniform(0.2, 0.5) for _ in range(3)]
 s = sum(weights)
 decision_map = {k: round(w / s, 2) for k, w in zip(selected_indicators, weights)}
 
-# 模組核心結構
+# 核心辨識碼
 now = datetime.utcnow().strftime("%Y%m%d%H%M%S")
 genetic_id = hashlib.md5((selected_symbol + now).encode()).hexdigest()[:12]
 creation_id = f"{selected_symbol}_{now}"
+training_trace_id = f"trace_{random.randint(100000,999999)}"
 
+# 模組主體
 module = {
     "id": "king",
     "symbol": selected_symbol,
@@ -71,10 +73,12 @@ module = {
     "human_note": "初代 king 模組。具備人格、風格、決策邏輯與風險偏好。",
     "decision_weighting_map": decision_map,
     "emotional_tendency": random.choice(emotions),
-    "training_trace_id": f"trace_{random.randint(100000,999999)}"
+    "training_trace_id": training_trace_id,
+    "version_stamp": "v1_full_final",
+    "is_divine": False
 }
 
-# 儲存 king 模組
+# 儲存模組
 with open(module_dir / "king.json", "w") as f:
     json.dump(module, f, indent=2)
 
