@@ -1,24 +1,25 @@
 import json
 from pathlib import Path
 
-MAX_HISTORY = 1000  # 固定記憶輪數
+MAX_HISTORY = 1000  # 最大記憶保留輪數
+MAX_ARCHIVES = 100  # 歷史封存輪數
+MAX_LOGS = 100      # 日誌封存輪數
 
+# 給每筆歷史資料打分數
 def score_memory(entry):
     score = 0
-    if entry.get("return_pct", 0) > 0:
-        score += 1
-    if entry.get("win_rate", 0) > 50:
-        score += 1
-    if entry.get("sharpe", 0) > 1:
-        score += 1
-    if entry.get("drawdown", 100) < 5:
-        score += 1
-    if entry.get("net_profit", 0) > 0:
-        score += 1
+    if entry.get("return_pct", 0) > 0: score += 1
+    if entry.get("win_rate", 0) > 50: score += 1
+    if entry.get("sharpe", 0) > 1: score += 1
+    if entry.get("drawdown", 100) < 5: score += 1
+    if entry.get("net_profit", 0) > 0: score += 1
     return score
 
-# 路徑
+# 路徑設定
 mem_path = Path("~/Killcore/king_memory.json").expanduser()
+archive_path = Path("~/Killcore/archives").expanduser()
+log_path = Path("~/Killcore/logs").expanduser()
+
 if not mem_path.exists():
     raise FileNotFoundError("找不到 king_memory.json")
 
@@ -40,22 +41,22 @@ for k, default in required_fields.items():
     if k not in memory:
         memory[k] = default
 
-# 標記保護輪次（風格轉變、意圖首次出現）
+# 保護風格與演化意圖首次出現輪次
 protected_indices = set()
 seen_styles = set()
 seen_intents = set()
-
-for i, trace in enumerate(memory.get("evolution_trace", [])):
+for trace in memory.get("evolution_trace", []):
     style = trace.get("style_profile")
     intent = tuple(trace.get("intent", []))
+    gen = trace.get("generation")
     if style and style not in seen_styles:
         seen_styles.add(style)
-        protected_indices.add(trace.get("generation"))
+        protected_indices.add(gen)
     if intent and intent not in seen_intents:
         seen_intents.add(intent)
-        protected_indices.add(trace.get("generation"))
+        protected_indices.add(gen)
 
-# 打分分類
+# 打分與淘汰邏輯
 scored = []
 for i, h in enumerate(memory["history"]):
     gen = h.get("generation", i)
@@ -63,28 +64,34 @@ for i, h in enumerate(memory["history"]):
     is_protected = gen in protected_indices or score >= 4
     scored.append((i, h, score, is_protected))
 
+# 排序保留最強與保護資料
 scored.sort(key=lambda x: (x[3], x[2]), reverse=True)
 final_pool = scored[:MAX_HISTORY]
 final_indices = {i for i, _, _, _ in final_pool}
-new_history = []
-new_aging_map = {}
 
-for i, (h, s) in enumerate(zip(memory["history"], [score_memory(h) for h in memory["history"]])):
+new_history, new_aging_map = [], {}
+for i, h in enumerate(memory["history"]):
     if i in final_indices:
         new_history.append(h)
     else:
-        replacement = next((x for x in final_pool if x[0] != i), None)
-        if replacement:
-            new_aging_map[str(i)] = f"被第 {replacement[0]} 輪覆蓋（score={replacement[2]:.1f}）"
-        else:
-            new_aging_map[str(i)] = f"被覆蓋（score={s:.1f}）"
+        new_aging_map[str(i)] = f"淘汰（score={score_memory(h):.1f}）"
 
 memory["history"] = new_history
 memory["aging_map"] = new_aging_map
 
-# 不再裁剪 evolution_trace 與 fail_indicators_count
-# 保留所有資料以利完整人格建模與長期演化分析
+# 實體資料夾清理邏輯（封存與日誌）
+def clean_folder(path: Path, keep: int):
+    if not path.exists(): return
+    files = sorted(path.glob("*"), key=lambda f: f.stat().st_mtime, reverse=True)
+    for f in files[keep:]:
+        try:
+            f.unlink()
+        except Exception as e:
+            print(f"刪除失敗 {f.name}: {e}")
+
+clean_folder(archive_path, MAX_ARCHIVES)
+clean_folder(log_path, MAX_LOGS)
 
 # 儲存
 mem_path.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
-print(f"[Memory Regulator] 完成智慧淘汰（無裁剪模式）｜ 現存紀錄={len(memory['history'])}，aging_map={len(memory['aging_map'])}，保留關鍵點={len(protected_indices)}")
+print(f"[Memory Regulator] 智慧清理完成 ｜ 紀錄數={len(memory['history'])}，進化={len(memory['evolution_trace'])}，封存淘汰={len(memory['aging_map'])}")
