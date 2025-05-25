@@ -3,8 +3,8 @@ import shutil
 from pathlib import Path
 
 MAX_HISTORY = 1000
-MAX_ARCHIVES = 100
-MAX_LOGS = 100
+MAX_LOGS = 0
+MAX_ARCHIVES = 0
 
 def score_memory(entry):
     score = 0
@@ -22,7 +22,6 @@ log_path = Path("~/Killcore/logs").expanduser()
 
 if not mem_path.exists():
     raise FileNotFoundError("找不到 king_memory.json")
-
 memory = json.loads(mem_path.read_text())
 
 # 自動補欄
@@ -41,7 +40,7 @@ for k, default in required_fields.items():
     if k not in memory:
         memory[k] = default
 
-# 保護演化風格與意圖
+# 保護演化風格與意圖（血統）
 protected_indices = set()
 seen_styles = set()
 seen_intents = set()
@@ -68,32 +67,43 @@ scored.sort(key=lambda x: (x[3], x[2]), reverse=True)
 final_pool = scored[:MAX_HISTORY]
 final_indices = {i for i, _, _, _ in final_pool}
 
-new_history, new_aging_map = [], {}
+S, A, B = [], [], []
+new_history, aging_map = [], {}
 for i, h in enumerate(memory["history"]):
+    score = score_memory(h)
     if i in final_indices:
         new_history.append(h)
+        if score >= 4: S.append(i)
+        elif score == 3: A.append(i)
+        else: B.append(i)
     else:
-        new_aging_map[str(i)] = f"淘汰（score={score_memory(h):.1f}）"
+        aging_map[str(i)] = f"淘汰（score={score}）"
 
 memory["history"] = new_history
-memory["aging_map"] = new_aging_map
+memory["aging_map"] = aging_map
 
-# 清理資料夾中多餘檔案或資料夾
+# 清理檔案（logs 和 archives 全砍）
 def clean_folder(path: Path, keep: int):
     if not path.exists(): return
     files = sorted(path.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True)
     for f in files[keep:]:
         try:
-            if f.is_file():
+            if f.is_file() or f.is_symlink():
                 f.unlink()
             elif f.is_dir():
                 shutil.rmtree(f)
         except Exception as e:
-            print(f"刪除失敗 {f.name}: {e}")
+            print(f"刪除失敗 {f}: {e}")
 
 clean_folder(archive_path, MAX_ARCHIVES)
 clean_folder(log_path, MAX_LOGS)
 
-# 儲存記憶
+# 儲存
 mem_path.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
-print(f"[Memory Regulator] 智慧清理完成 ｜ 紀錄數={len(memory['history'])}，進化={len(memory['evolution_trace'])}，封存淘汰={len(memory['aging_map'])}")
+
+# 結果
+print("── 模組 11：記憶階層清理完成（logs + archives 完全清空）──")
+print(f"S級保留：{len(S)}, A級保留：{len(A)}, B級淘汰：{len(B)}")
+print(f"融合後記憶保留數：{len(memory['history'])}")
+print(f"進化紀錄數：{len(memory['evolution_trace'])}")
+print(f"aging_map 長度：{len(memory['aging_map'])}")
