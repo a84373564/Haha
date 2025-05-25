@@ -4,7 +4,7 @@ from pathlib import Path
 
 # 配置區
 SYMBOLS = ["SHIBUSDT", "DOGEUSDT"]
-MEMORY_FILE = Path("symbol_memory.json")
+memory_file = Path("~/Killcore/symbol_memory.json").expanduser()
 API_BASE = "https://api.mexc.com"
 
 # 初始化記憶檔
