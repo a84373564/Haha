@@ -1,17 +1,30 @@
 import json
 from pathlib import Path
 
-# 路徑設定
-mem_path = Path("~/Killcore/king_memory.json").expanduser()
+MAX_HISTORY = 1000  # 固定記憶輪數
 
-# 檢查檔案是否存在
+def score_memory(entry):
+    score = 0
+    if entry.get("return_pct", 0) > 0:
+        score += 1
+    if entry.get("win_rate", 0) > 50:
+        score += 1
+    if entry.get("sharpe", 0) > 1:
+        score += 1
+    if entry.get("drawdown", 100) < 5:
+        score += 1
+    if entry.get("net_profit", 0) > 0:
+        score += 1
+    return score
+
+# 路徑
+mem_path = Path("~/Killcore/king_memory.json").expanduser()
 if not mem_path.exists():
     raise FileNotFoundError("找不到 king_memory.json")
 
-# 載入記憶內容
 memory = json.loads(mem_path.read_text())
 
-# 確保所有必要欄位存在（自動補欄機制）
+# 自動補欄
 required_fields = {
     "live_rounds": 0,
     "fail_indicators_count": {},
@@ -27,21 +40,51 @@ for k, default in required_fields.items():
     if k not in memory:
         memory[k] = default
 
-# 清理策略 1：歷史記憶僅保留最新 1000 輪
-if len(memory["history"]) > 1000:
-    excess = len(memory["history"]) - 1000
-    memory["aging_map"] = {str(i): "過期" for i in range(excess)}
-    memory["history"] = memory["history"][-1000:]
+# 標記保護輪次（風格轉變、意圖首次出現）
+protected_indices = set()
+seen_styles = set()
+seen_intents = set()
 
-# 清理策略 2：進化紀錄僅保留最新 100 筆
-if len(memory["evolution_trace"]) > 100:
-    memory["evolution_trace"] = memory["evolution_trace"][-100:]
+for i, trace in enumerate(memory.get("evolution_trace", [])):
+    style = trace.get("style_profile")
+    intent = tuple(trace.get("intent", []))
+    if style and style not in seen_styles:
+        seen_styles.add(style)
+        protected_indices.add(trace.get("generation"))
+    if intent and intent not in seen_intents:
+        seen_intents.add(intent)
+        protected_indices.add(trace.get("generation"))
 
-# 清理策略 3：風險指標只保留前 50 項
-if len(memory["fail_indicators_count"]) > 50:
-    sorted_items = sorted(memory["fail_indicators_count"].items(), key=lambda x: x[1], reverse=True)
-    memory["fail_indicators_count"] = dict(sorted_items[:50])
+# 打分分類
+scored = []
+for i, h in enumerate(memory["history"]):
+    gen = h.get("generation", i)
+    score = score_memory(h)
+    is_protected = gen in protected_indices or score >= 4
+    scored.append((i, h, score, is_protected))
 
-# 儲存更新
+scored.sort(key=lambda x: (x[3], x[2]), reverse=True)
+final_pool = scored[:MAX_HISTORY]
+final_indices = {i for i, _, _, _ in final_pool}
+new_history = []
+new_aging_map = {}
+
+for i, (h, s) in enumerate(zip(memory["history"], [score_memory(h) for h in memory["history"]])):
+    if i in final_indices:
+        new_history.append(h)
+    else:
+        replacement = next((x for x in final_pool if x[0] != i), None)
+        if replacement:
+            new_aging_map[str(i)] = f"被第 {replacement[0]} 輪覆蓋（score={replacement[2]:.1f}）"
+        else:
+            new_aging_map[str(i)] = f"被覆蓋（score={s:.1f}）"
+
+memory["history"] = new_history
+memory["aging_map"] = new_aging_map
+
+# 不再裁剪 evolution_trace 與 fail_indicators_count
+# 保留所有資料以利完整人格建模與長期演化分析
+
+# 儲存
 mem_path.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
-print(f"[Memory Regulator] 清理完成 ｜ 紀錄數={len(memory['history'])}，進化紀錄={len(memory['evolution_trace'])}")
+print(f"[Memory Regulator] 完成智慧淘汰（無裁剪模式）｜ 現存紀錄={len(memory['history'])}，aging_map={len(memory['aging_map'])}，保留關鍵點={len(protected_indices)}")
