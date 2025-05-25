@@ -15,10 +15,10 @@ if mem_path.exists():
     try:
         memory = json.loads(mem_path.read_text())
     except json.JSONDecodeError:
-        print("[警告] 無法解析記憶體檔案，將重建記憶。")
+        print("[警告] king_memory.json 解析失敗，重新初始化")
         memory = {}
 
-# 初始化結構
+# 初始化記憶體欄位
 memory.setdefault("live_rounds", 0)
 memory.setdefault("fail_indicators_count", {})
 memory.setdefault("history", [])
@@ -32,16 +32,16 @@ memory.setdefault("bad_behavior_tag", [])
 memory.setdefault("drift_history", [])
 memory.setdefault("intent_summary", [])
 
-# 增加 live_rounds
+# 第幾輪模擬
 memory["live_rounds"] += 1
 
-# 累計失敗因子次數
+# 累計失敗因子
 for f in perf.get("fail_indicators", []):
     memory["fail_indicators_count"][f] = memory["fail_indicators_count"].get(f, 0) + 1
     if memory["fail_indicators_count"][f] >= 10:
         memory["memory_flags"][f] = "封印候選"
 
-# 記錄本輪紀錄
+# 建立單輪記錄
 round_record = {
     "ts": datetime.now().isoformat(),
     "return_pct": perf.get("return_pct"),
@@ -56,6 +56,11 @@ round_record = {
     "params": king.get("parameters"),
     "style": king.get("style_profile"),
     "intent": king.get("evolution_intent", []),
+    "capital_used": perf.get("capital_used", 70.51),
+    "entry_behavior": perf.get("entry_behavior", []),
+    "risk_profile": perf.get("risk_profile", {}),
+    "execution_summary": perf.get("execution_summary", {}),
+    "simulation_stamp": perf.get("simulation_stamp", datetime.now().isoformat()),
     "score_snapshot": {
         "bias": king.get("init_bias_score"),
         "temp": king.get("temperature_level"),
@@ -65,17 +70,17 @@ round_record = {
 }
 memory["history"].append(round_record)
 
-# aging_map 標記過期資料
+# aging_map 處理
 if len(memory["history"]) > 30:
     for i in range(len(memory["history"]) - 30):
         memory["aging_map"][i] = "過期"
     memory["history"] = memory["history"][-30:]
 
-# 學習指數（最近 5 輪正報酬）
+# 最近 5 輪學習力
 recent = memory["history"][-5:]
 memory["learning_score"] = sum(1 for r in recent if r.get("return_pct", 0) > 0)
 
-# 風格推估（根據 TP / SL 比例）
+# 風格推估
 tp = king.get("parameters", {}).get("tp_pct", 5)
 sl = king.get("parameters", {}).get("sl_pct", 2)
 if tp > 8:
@@ -85,7 +90,7 @@ elif sl < 2:
 else:
     memory["style_profile"] = "balanced"
 
-# 壞習慣偵測與標記
+# 壞習慣偵測
 tags = set(memory.get("bad_behavior_tag", []))
 if perf.get("drawdown", 0) > 6:
     tags.add("高回撤")
@@ -97,7 +102,7 @@ if perf.get("fail_reason"):
     tags.add("重大失誤")
 memory["bad_behavior_tag"] = list(tags)
 
-# 進化摘要與人格傾向記錄
+# 進化摘要記錄
 evo = {
     "generation": king.get("generation"),
     "ts": datetime.now().isoformat(),
@@ -110,13 +115,11 @@ evo = {
 memory["evolution_trace"].append(evo)
 memory["intent_summary"].extend(king.get("evolution_intent", []))
 
-# 風格漂移偵測
+# 漂移標記
 style_set = set(e["style"] for e in memory["evolution_trace"][-3:] if "style" in e)
 memory["style_drift_flag"] = len(style_set) > 1
 memory["drift_history"].append(list(style_set))
 
 # 寫入記憶
 mem_path.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
-
-# CLI 輸出
 print(f"[Memory Recorder] 第 {memory['live_rounds']} 輪完成 | 學習力={memory['learning_score']} | 標記：{', '.join(memory['bad_behavior_tag'])}")
