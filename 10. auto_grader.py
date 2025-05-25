@@ -1,88 +1,70 @@
 import json
 from pathlib import Path
+from datetime import datetime
 
-# 路徑
-mem_path = Path("~/Killcore/king_memory.json").expanduser()
+king_path = Path("~/Killcore/modules/king.json").expanduser()
 perf_path = Path("~/Killcore/king_performance.json").expanduser()
+mem_path = Path("~/Killcore/king_memory.json").expanduser()
 
 # 載入資料
+king = json.loads(king_path.read_text())
+perf = json.loads(perf_path.read_text())
 memory = json.loads(mem_path.read_text())
-perf = json.loads(perf_path.read_text()) if perf_path.exists() else {}
 
-# 評級變數
-score = 0
-reasons = []
+history = memory.get("history", [])
+trace = memory.get("evolution_trace", [])
+fail_counts = memory.get("fail_indicators_count", {})
 
-# 判斷 1：學習力
-learning_score = memory.get("learning_score", 0)
-if learning_score >= 4:
-    score += 1
-    reasons.append("學習力穩定（≥4/5 輪正報酬）")
+# 報酬趨勢統計
+returns = [r.get("return_pct", 0) for r in history]
+avg_return_start = sum(returns[:5]) / 5 if len(returns) >= 5 else 0
+avg_return_recent = sum(returns[-5:]) / 5 if len(returns) >= 5 else 0
+sharpe_values = [r.get("sharpe", 0) for r in history if "sharpe" in r]
+avg_sharpe_start = sum(sharpe_values[:5]) / 5 if len(sharpe_values) >= 5 else 0
+avg_sharpe_recent = sum(sharpe_values[-5:]) / 5 if len(sharpe_values) >= 5 else 0
+
+# 意圖多樣性
+intents = set()
+for r in trace:
+    intent = tuple(r.get("intent", []))
+    if intent:
+        intents.add(intent)
+
+# 風格變異計算
+style_profile_history = [r.get("style_profile") for r in trace if r.get("style_profile")]
+style_variants = len(set(style_profile_history))
+
+# 失敗類型統計
+fail_total = sum(fail_counts.values())
+top_fail = sorted(fail_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+
+# 空轉偵測
+stagnant = False
+if len(returns) >= 10:
+    recent = returns[-5:]
+    all_small = all(abs(r) < 1 for r in recent)
+    same_intent = len(set(",".join(map(str, r.get("intent", []))) for r in trace[-5:])) == 1
+    if all_small and same_intent:
+        stagnant = True
+
+# 報告輸出
+print("\n[Auto Grader] 模組完整歷史進化診斷")
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+print(f"代數：{king.get('generation')} ｜ 生存輪數：{memory.get('live_rounds', len(history))}")
+print(f"報酬趨勢：{avg_return_start:+.2f}% → {avg_return_recent:+.2f}%")
+print(f"Sharpe 指數：{avg_sharpe_start:.2f} → {avg_sharpe_recent:.2f}")
+print(f"風格變化次數：{style_variants} ｜ 當前風格：{king.get('style_profile')}")
+print(f"意圖多樣性：{len(intents)} 種 ｜ 失敗總數：{fail_total}")
+print(f"Top 失敗原因：", ", ".join([f"{k}({v})" for k,v in top_fail]) or "無")
+
+# 綜合評估
+print("\n【綜合判斷】：", end="")
+if stagnant:
+    print("模組疑似進入空轉（報酬無進展、意圖重複）")
+elif avg_return_recent > avg_return_start and avg_sharpe_recent > avg_sharpe_start:
+    print("模組正在穩定成長，進化方向良好")
 else:
-    reasons.append("學習力尚未穩定")
+    print("模組仍在調整階段，部分進化未達標")
 
-# 判斷 2：報酬趨勢
-returns = [r.get("return_pct", 0) for r in memory.get("history", [])[-5:]]
-if all(r > 0 for r in returns[-3:]):
-    score += 1
-    reasons.append("最近三輪皆為正報酬")
-else:
-    reasons.append("尚未形成連續報酬曲線")
-
-# 判斷 3：風格穩定性
-styles = [r.get("style") for r in memory.get("history", [])[-5:] if r.get("style")]
-if len(set(styles)) <= 2 and len(styles) >= 3:
-    score += 1
-    reasons.append("風格穩定（5 輪內無明顯漂移）")
-else:
-    reasons.append("風格尚未固定")
-
-# 判斷 4：情緒穩定性（透過 bias / emotional 記錄）
-emotions = [r.get("score_snapshot", {}).get("emotion") for r in memory.get("history", [])[-5:] if r.get("score_snapshot")]
-if emotions.count(emotions[-1]) >= 3:
-    score += 1
-    reasons.append("情緒傾向穩定")
-else:
-    reasons.append("情緒仍在波動")
-
-# 判斷 5：封印因子
-seals = [k for k, v in memory.get("memory_flags", {}).items() if v == "封印候選"]
-if not seals:
-    score += 1
-    reasons.append("無封印因子")
-else:
-    reasons.append(f"存在封印因子：{', '.join(seals)}")
-
-# 判斷 6：爆發能力
-explosions = [r.get("return_pct", 0) for r in memory.get("history", []) if r.get("return_pct", 0) >= 8]
-if explosions:
-    score += 1
-    reasons.append(f"具備爆發輪（共 {len(explosions)} 次 ≥ +8%）")
-else:
-    reasons.append("尚無爆發性表現")
-
-# 判斷 7：回撤與風控
-drawdowns = [r.get("drawdown", 0) for r in memory.get("history", [])[-5:]]
-if max(drawdowns, default=0) <= 4.5:
-    score += 1
-    reasons.append("回撤控制良好（近 5 輪皆 ≤ 4.5%）")
-else:
-    reasons.append("近期有高風險回撤")
-
-# 評級總結
-stars = "★" * score + "☆" * (7 - score)
-
-# 輸出報告
-print("\n[Auto Grader] 模組進化成熟度分析")
-print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print(f"評級：{stars}（{score} / 7）")
-for r in reasons:
-    print(" -", r)
-
-# 實戰建議
-if score >= 6:
-    print("\n[建議] 模組已具備實盤實戰資格，可考慮進入實單測試")
-elif score >= 4:
-    print("\n[建議] 模組具備潛力，可進入沙盒或小額驗證")
-else:
-    print("\n[建議] 模組仍在成長階段，建議持續進化與觀察")
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+print(f"評估時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
