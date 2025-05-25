@@ -1,70 +1,78 @@
 import json
 from pathlib import Path
-from datetime import datetime
+from statistics import mean, stdev
 
-king_path = Path("~/Killcore/modules/king.json").expanduser()
-perf_path = Path("~/Killcore/king_performance.json").expanduser()
 mem_path = Path("~/Killcore/king_memory.json").expanduser()
+output_path = Path("~/Killcore/king_self_evaluation.json").expanduser()
 
-# 載入資料
-king = json.loads(king_path.read_text())
-perf = json.loads(perf_path.read_text())
+if not mem_path.exists():
+    raise FileNotFoundError("找不到 king_memory.json")
+
 memory = json.loads(mem_path.read_text())
+history = memory.get("history", [])[-20:]  # 只分析最近 20 輪
+evo_trace = memory.get("evolution_trace", [])[-5:]
+fail_stats = memory.get("fail_indicators_count", {})
 
-history = memory.get("history", [])
-trace = memory.get("evolution_trace", [])
-fail_counts = memory.get("fail_indicators_count", {})
-
-# 報酬趨勢統計
+# --- 趨勢評估 ---
 returns = [r.get("return_pct", 0) for r in history]
-avg_return_start = sum(returns[:5]) / 5 if len(returns) >= 5 else 0
-avg_return_recent = sum(returns[-5:]) / 5 if len(returns) >= 5 else 0
-sharpe_values = [r.get("sharpe", 0) for r in history if "sharpe" in r]
-avg_sharpe_start = sum(sharpe_values[:5]) / 5 if len(sharpe_values) >= 5 else 0
-avg_sharpe_recent = sum(sharpe_values[-5:]) / 5 if len(sharpe_values) >= 5 else 0
+drawdowns = [r.get("drawdown", 100) for r in history]
+win_rates = [r.get("win_rate", 0) for r in history]
 
-# 意圖多樣性
-intents = set()
-for r in trace:
-    intent = tuple(r.get("intent", []))
-    if intent:
-        intents.add(intent)
+def trend_direction(data):
+    return "上升" if len(data) >= 2 and data[-1] > data[0] else "下降"
 
-# 風格變異計算
-style_profile_history = [r.get("style_profile") for r in trace if r.get("style_profile")]
-style_variants = len(set(style_profile_history))
+def stability_score(data):
+    return round(stdev(data), 2) if len(data) >= 2 else 0
 
-# 失敗類型統計
-fail_total = sum(fail_counts.values())
-top_fail = sorted(fail_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+trend_report = {
+    "return_trend": trend_direction(returns),
+    "drawdown_trend": trend_direction(drawdowns[::-1]),
+    "winrate_trend": trend_direction(win_rates),
+    "return_std": stability_score(returns),
+    "drawdown_avg": round(mean(drawdowns), 2) if drawdowns else 100,
+    "learning_score": memory.get("learning_score", 0),
+    "fail_count": sum(fail_stats.values())
+}
 
-# 空轉偵測
-stagnant = False
-if len(returns) >= 10:
-    recent = returns[-5:]
-    all_small = all(abs(r) < 1 for r in recent)
-    same_intent = len(set(",".join(map(str, r.get("intent", []))) for r in trace[-5:])) == 1
-    if all_small and same_intent:
-        stagnant = True
+# --- 評分與標籤 ---
+score = 0
+if trend_report["return_trend"] == "上升": score += 2
+if trend_report["drawdown_trend"] == "下降": score += 2
+if trend_report["return_std"] < 3: score += 1
+if trend_report["learning_score"] >= 4: score += 1
+if trend_report["fail_count"] < 10: score += 1
 
-# 報告輸出
-print("\n[Auto Grader] 模組完整歷史進化診斷")
-print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print(f"代數：{king.get('generation')} ｜ 生存輪數：{memory.get('live_rounds', len(history))}")
-print(f"報酬趨勢：{avg_return_start:+.2f}% → {avg_return_recent:+.2f}%")
-print(f"Sharpe 指數：{avg_sharpe_start:.2f} → {avg_sharpe_recent:.2f}")
-print(f"風格變化次數：{style_variants} ｜ 當前風格：{king.get('style_profile')}")
-print(f"意圖多樣性：{len(intents)} 種 ｜ 失敗總數：{fail_total}")
-print(f"Top 失敗原因：", ", ".join([f"{k}({v})" for k,v in top_fail]) or "無")
-
-# 綜合評估
-print("\n【綜合判斷】：", end="")
-if stagnant:
-    print("模組疑似進入空轉（報酬無進展、意圖重複）")
-elif avg_return_recent > avg_return_start and avg_sharpe_recent > avg_sharpe_start:
-    print("模組正在穩定成長，進化方向良好")
+if score >= 6:
+    level = "S+（已達實戰）"
+    advice = "建議保守進化或微調風格以穩定實戰績效"
+elif score >= 4:
+    level = "A（穩定進化中）"
+    advice = "維持風格主軸，可調整進場與TP/SL參數"
+elif score >= 2:
+    level = "B（波動偏高）"
+    advice = "需觀察，考慮強化風險管理或改變策略"
 else:
-    print("模組仍在調整階段，部分進化未達標")
+    level = "C（退化或失控）"
+    advice = "建議重置進化方向，並記錄錯誤模式"
 
-print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print(f"評估時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+# --- 產出 JSON 給模組 3 使用 ---
+result = {
+    "evolution_grade": level,
+    "trend_score": score,
+    "trend_report": trend_report,
+    "evolution_advice": advice,
+    "status_flag": "ok"
+}
+output_path.write_text(json.dumps(result, indent=2, ensure_ascii=False))
+
+# CLI 顯示給人類參考
+print("— 模組 10：自我進化分析報告 —")
+print(f"狀態等級：{level}")
+print(f"趨勢分數：{score} 分")
+print("報酬趨勢：", trend_report["return_trend"])
+print("回撤趨勢：", trend_report["drawdown_trend"])
+print("勝率趨勢：", trend_report["winrate_trend"])
+print("報酬波動度：", trend_report["return_std"])
+print("學習力：", trend_report["learning_score"], "/ 5")
+print("失敗總數：", trend_report["fail_count"])
+print("建議行動：", advice)
