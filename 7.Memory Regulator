@@ -27,15 +27,15 @@ for k, default in required_fields.items():
     if k not in memory:
         memory[k] = default
 
-# 清理策略 1：歷史記憶僅保留最新 30 輪
-if len(memory["history"]) > 30:
-    excess = len(memory["history"]) - 30
+# 清理策略 1：歷史記憶僅保留最新 1000 輪
+if len(memory["history"]) > 1000:
+    excess = len(memory["history"]) - 1000
     memory["aging_map"] = {str(i): "過期" for i in range(excess)}
-    memory["history"] = memory["history"][-30:]
+    memory["history"] = memory["history"][-1000:]
 
-# 清理策略 2：進化紀錄僅保留最新 20 筆
-if len(memory["evolution_trace"]) > 20:
-    memory["evolution_trace"] = memory["evolution_trace"][-20:]
+# 清理策略 2：進化紀錄僅保留最新 100 筆
+if len(memory["evolution_trace"]) > 100:
+    memory["evolution_trace"] = memory["evolution_trace"][-100:]
 
 # 清理策略 3：風險指標只保留前 50 項
 if len(memory["fail_indicators_count"]) > 50:
